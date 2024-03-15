@@ -1,0 +1,989 @@
+Program.Sub.Preflight.Start
+V.Global.sToken.Declare(String, "")
+Program.Sub.Preflight.End
+
+Program.Sub.SS_SetToken.Start
+'pass Token
+
+V.Global.sToken.Set(V.Args.Token)
+Program.Sub.SS_SetToken.End
+
+Program.Sub.SS_CreateDataTable.Start
+'pass ID
+'pass DATATABLE_NAME
+'pass TYPE (sheet = S, Report = R)
+'optional boolean INCLUDE_ROW_ID
+
+V.Local.bExists.Declare(Boolean)
+V.Local.bRowID.Declare(Boolean, False)
+
+F.Intrinsic.Variable.ArgExists("INCLUDE_ROW_ID", V.Local.bExists)
+F.Intrinsic.Control.If(V.Local.bExists)
+	V.Local.bRowID.Set(V.Args.INCLUDE_ROW_ID)
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.CallSub(SS_APIGet, "REQUEST", V.Args.ID, "PARAMETERS", "?includeAll=True", "TYPE", V.Args.Type)
+F.Intrinsic.Control.CallSub(SS_JSONToDataTable, "FILE", V.Args.RETURN_File, "DATATABLE_NAME", V.Args.DATATABLE_NAME, "INCLUDE_ROW_ID", V.Local.bRowID)
+F.Intrinsic.File.DeleteFile(V.Args.RETURN_File)
+Program.Sub.SS_CreateDataTable.End
+
+Program.Sub.SS_CreateSheetDataTable.Start
+'pass SHEET_NAME
+'pass DATATABLE_NAME
+'optional boolean INCLUDE_ROW_ID
+
+V.Local.bExists.Declare(Boolean)
+V.Local.bRowID.Declare(Boolean, False)
+
+F.Intrinsic.Variable.ArgExists("INCLUDE_ROW_ID", V.Local.bExists)
+F.Intrinsic.Control.If(V.Local.bExists)
+	V.Local.bRowID.Set(V.Args.INCLUDE_ROW_ID)
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.CallSub(SS_GetSheetID, "SHEET_NAME", V.Args.SHEET_NAME)
+F.Intrinsic.Control.CallSub(SS_CreateDataTable, "ID", V.Args.RETURN_SHEET_ID, "DATATABLE_NAME", V.Args.DATATABLE_NAME, "TYPE", "S", "INCLUDE_ROW_ID", V.Local.bRowID)
+Program.Sub.SS_CreateSheetDataTable.End
+
+Program.Sub.SS_CreateReportDataTable.Start
+'pass REPORT_NAME
+'pass DATATABLE_NAME
+
+F.Intrinsic.Control.CallSub(SS_GetReportID, "REPORT_NAME", V.Args.REPORT_NAME)
+F.Intrinsic.Control.CallSub(SS_CreateDataTable, "ID", V.Args.RETURN_REPORT_ID, "DATATABLE_NAME", V.Args.DATATABLE_NAME, "TYPE", "R")
+Program.Sub.SS_CreateReportDataTable.End
+
+Program.Sub.SS_JSONToDataTable.Start
+'pass FILE
+'pass DATATABLE_NAME
+'optional boolean INCLUDE_ROW_ID
+
+V.Local.bExist.Declare(Boolean)
+V.Local.sPath.Declare(String)
+V.Local.iCounter.Declare(Long, 0)
+V.Local.sColumn.Declare(String)
+V.Local.sType.Declare(String)
+V.Local.iColumns.Declare(Long)
+V.Local.iRows.Declare(Long)
+V.Local.iJ.Declare(Long)
+V.Local.sValues.Declare(String)
+V.Local.sColumns.Declare(String)
+V.Local.bPopulated.Declare(Boolean, False)
+V.Local.sFields.Declare(String)
+V.Local.bInString.Declare(Boolean)
+V.Local.sFieldTemp.Declare(String)
+V.Local.bRowID.Declare(Boolean)
+V.Local.sRowID.Declare(String)
+
+'not a good way to do this
+F.Intrinsic.Variable.ArgExists("INCLUDE_ROW_ID", V.Local.bExist)
+F.Intrinsic.Control.If(V.Local.bExist)
+	V.Local.bRowID.Set(V.Args.INCLUDE_ROW_ID)
+F.Intrinsic.Control.Else
+	V.Local.bRowID.Set(False)
+F.Intrinsic.Control.EndIf
+
+F.Communication.JSON.Reset
+F.Communication.JSON.ParseFile(V.Args.File)
+
+'get column count
+V.Local.iColumns.Set(1)
+F.Intrinsic.String.Build("/JSON/columns/[{0}]", V.Local.iColumns, V.Local.sPath)
+F.Communication.JSON.HasXPath(V.Local.sPath, V.Local.bExist)
+F.Intrinsic.Control.DoUntil(V.Local.bExist,=,False)
+	F.Intrinsic.Math.Add(V.Local.iColumns, 1, V.Local.iColumns)
+	F.Intrinsic.String.Build("/JSON/columns/[{0}]", V.Local.iColumns, V.Local.sPath)
+	F.Communication.JSON.HasXPath(V.Local.sPath, V.Local.bExist)
+F.Intrinsic.Control.Loop
+F.Intrinsic.Math.Sub(V.Local.iColumns, 1, V.Local.iColumns)
+V.Local.sColumns.Redim(1, V.Local.iColumns)
+
+'first create the datatable
+F.Data.DataTable.Create(V.Args.Datatable_Name, True)
+F.Intrinsic.Control.If(V.Local.bRowID)
+	F.Data.DataTable.AddColumn(V.Args.DataTable_Name, "ROW_ID", String)
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.For(V.Local.iCounter, 1, V.Local.iColumns, 1)
+	'get column name
+	F.Intrinsic.String.Build("/JSON/columns/[{0}]/title", V.Local.iCounter, V.Local.sPath)
+	F.Communication.JSON.HasXPath(V.Local.sPath, V.Local.bExist)
+	F.Intrinsic.Control.If(V.Local.bExist)
+		F.Communication.JSON.SetProperty("XPath", V.Local.sPath)
+		F.Communication.JSON.ReadProperty("XText", V.Local.sColumn)
+		F.Intrinsic.String.StripCharacters(V.Local.sColumn, V.Local.sColumn)
+	F.Intrinsic.Control.Else
+		F.Intrinsic.String.Build("COLUMN_{0}", V.Local.iCounter, V.Local.sColumn)
+	F.Intrinsic.Control.EndIf
+	
+	'get column type
+	F.Intrinsic.String.Build("/JSON/columns/[{0}]/type", V.Local.iCounter, V.Local.sPath)
+	F.Communication.JSON.HasXPath(V.Local.sPath, V.Local.bExist)
+	F.Intrinsic.Control.If(V.Local.bExist)
+		F.Communication.JSON.SetProperty("XPath", V.Local.sPath)
+		F.Communication.JSON.ReadProperty("XText", V.Local.sType)
+		F.Intrinsic.String.TrimChar(V.Local.sType.Trim, V.Ambient.DblQuote, V.Local.sType)
+		F.Intrinsic.Control.SelectCase(V.Local.sType.UCase)
+			F.Intrinsic.Control.Case("DATE")
+				V.Local.sType.Set("Date")
+			F.Intrinsic.Control.Case("CHECKBOX")
+				V.Local.sType.Set("Boolean")
+			F.Intrinsic.Control.CaseElse
+				V.Local.sType.Set("String")
+		F.Intrinsic.Control.EndSelect
+	F.Intrinsic.Control.Else
+		V.Local.sType.Set("String")
+	F.Intrinsic.Control.EndIf
+	
+	'make sure no duplicates
+	V.Local.sFields.Set(V.DataTable.[V.Args.DataTable_Name].FieldNames)
+	F.Intrinsic.String.Build("*!*{0}*!*", V.Local.sFields, V.Local.sFields)
+	F.Intrinsic.String.Build("*!*{0}*!*", V.Local.sColumn, V.Local.sFieldTemp)
+	F.Intrinsic.String.IsInString(V.Local.sFields, V.Local.sFieldTemp, True, V.Local.bInString)
+	
+	V.Local.iJ.Set(0)
+	F.Intrinsic.Control.DoUntil(V.Local.bInString, =, False)
+		F.Intrinsic.String.Build("{0}_{1}", V.Local.sColumn, V.Local.iJ.++, V.Local.sFieldTemp)
+		F.Intrinsic.String.Build("*!*{0}*!*", V.Local.sFieldTemp, V.Local.sFieldTemp)
+		F.Intrinsic.String.IsInString(V.Local.sFields, V.Local.sFieldTemp, True, V.Local.bInString)
+	F.Intrinsic.Control.Loop
+	
+	F.Intrinsic.Control.If(V.Local.iJ, >, 0)
+		F.Intrinsic.String.Replace(V.Local.sFieldTemp, "*!*", "", V.Local.sColumn)
+	F.Intrinsic.Control.EndIf
+	
+	'add column
+	F.Intrinsic.Control.SelectCase(V.Local.sType)
+		F.Intrinsic.Control.Case("Date")
+			F.Data.DataTable.AddColumn(V.Args.DataTable_Name, V.Local.sColumn, V.Local.sType, "1900-01-01")
+		F.Intrinsic.Control.Case("String")
+			F.Data.DataTable.AddColumn(V.Args.DataTable_Name, V.Local.sColumn, V.Local.sType, "")
+		F.Intrinsic.Control.Case("Boolean")
+			F.Data.DataTable.AddColumn(V.Args.DataTable_Name, V.Local.sColumn, V.Local.sType, False)
+	F.Intrinsic.Control.EndSelect
+	V.Local.sColumns(V.Local.iCounter).Set(V.Local.sColumn)
+F.Intrinsic.Control.Next(V.Local.iCounter)
+
+'get row count
+V.Local.iRows.Set(1)
+F.Intrinsic.String.Build("/JSON/rows/[{0}]", V.Local.iRows, V.Local.sPath)
+F.Communication.JSON.HasXPath(V.Local.sPath, V.Local.bExist)
+F.Intrinsic.Control.DoUntil(V.Local.bExist,=,False)
+	F.Intrinsic.Math.Add(V.Local.iRows, 1, V.Local.iRows)
+	F.Intrinsic.String.Build("/JSON/rows/[{0}]", V.Local.iRows, V.Local.sPath)
+	F.Communication.JSON.HasXPath(V.Local.sPath, V.Local.bExist)
+F.Intrinsic.Control.Loop
+F.Intrinsic.Math.Sub(V.Local.iRows, 1, V.Local.iRows)
+
+'add rows
+V.Local.sValues.Redim(1, V.Local.iColumns)
+F.Intrinsic.Control.For(V.Local.iCounter, 1, V.Local.iRows, 1)
+	'get value for each column
+	V.Local.bPopulated.Set(False)
+	F.Intrinsic.Control.For(V.Local.iJ, 1, V.Local.iColumns, 1)
+		F.Intrinsic.String.Build("/JSON/rows/[{0}]/cells/[{1}]/value", V.Local.iCounter, V.Local.iJ, V.Local.sPath)
+		F.Communication.JSON.HasXPath(V.Local.sPath, V.Local.bExist)
+		F.Intrinsic.Control.If(V.Local.bExist)
+			F.Communication.JSON.SetProperty("XPath", V.Local.sPath)
+			F.Communication.JSON.ReadProperty("XText", V.Local.sValues(V.Local.iJ))
+			F.Intrinsic.String.TrimChar(V.Local.sValues(V.Local.iJ), V.Ambient.DblQuote, V.Local.sValues(V.Local.iJ))
+			F.Intrinsic.Control.If(V.Local.sValues(V.Local.iJ).Trim, !=, "")
+				V.Local.bPopulated.Set(True)
+			F.Intrinsic.Control.EndIf
+		F.Intrinsic.Control.Else
+			V.Local.sValues(V.Local.iJ).Set("")
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.Next(V.Local.iJ)
+	
+	'get row ID
+	F.Intrinsic.String.Build("/JSON/rows/[{0}]/id", V.Local.iCounter, V.Local.iJ, V.Local.sPath)
+	F.Communication.JSON.HasXPath(V.Local.sPath, V.Local.bExist)
+	F.Intrinsic.Control.If(V.Local.bExist)
+		F.Communication.JSON.SetProperty("XPath", V.Local.sPath)
+		F.Communication.JSON.ReadProperty("XText", V.Local.sRowID)
+	F.Intrinsic.Control.Else
+		V.Local.sRowID.Set("")
+	F.Intrinsic.Control.EndIf
+	
+	'add row if populated
+	F.Intrinsic.Control.If(V.Local.bPopulated)
+		F.Data.DataTable.AddRow(V.Args.DataTable_Name)
+		F.Intrinsic.Control.If(V.Local.bRowID)
+			F.Data.DataTable.SetValue(V.Args.DataTable_Name, V.DataTable.[V.Args.DATATABLE_NAME].RowCount--, "ROW_ID", V.Local.sRowID)
+		F.Intrinsic.Control.EndIf
+		F.Intrinsic.Control.For(V.Local.iJ, 1, V.Local.iColumns, 1)
+			F.Intrinsic.Control.If(V.Local.sValues(V.Local.iJ).Trim, !=, "")
+				F.Data.DataTable.SetValue(V.Args.DataTable_Name, V.DataTable.[V.Args.DATATABLE_NAME].RowCount--, V.Local.sColumns(V.Local.iJ), V.Local.sValues(V.Local.iJ))
+			F.Intrinsic.Control.EndIf
+		F.Intrinsic.Control.Next(V.Local.iJ)
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.Next(V.Local.iCounter)
+Program.Sub.SS_JSONToDataTable.End
+
+Program.Sub.SS_GetSheetID.Start
+'pass SHEET_NAME
+'returns RETURN_SHEET_ID
+'this will return the first sheet with that name it finds
+
+V.Local.sReturn.Declare(String)
+F.Intrinsic.Control.CallSub(SS_GetID, "NAME", V.Args.SHEET_NAME, "TYPE", "S")
+V.Local.sReturn.Set(V.Args.RETURN_ID)
+F.Intrinsic.Variable.AddRV("RETURN_SHEET_ID", V.Local.sReturn)
+Program.Sub.SS_GetSheetID.End
+
+Program.Sub.SS_GetReportID.Start
+'pass REPORT_NAME
+'returns RETURN_REPORT_ID
+'this will return the first REPORT with that name it finds
+
+V.Local.sReturn.Declare(String)
+F.Intrinsic.Control.CallSub(SS_GetID, "NAME", V.Args.REPORT_NAME, "TYPE", "R")
+V.Local.sReturn.Set(V.Args.RETURN_ID)
+F.Intrinsic.Variable.AddRV("RETURN_REPORT_ID", V.Args.RETURN_ID)
+Program.Sub.SS_GetReportID.End
+
+Program.Sub.SS_GetID.Start
+'pass NAME
+'pass Type S = sheets, R = Reports
+'returns RETURN_ID
+'this will return the first sheet/report with that name it finds
+
+V.Local.bExists.Declare(Boolean, False)
+V.Local.iNodes.Declare(Long)
+V.Local.sPath.Declare(String)
+V.Local.sValue.Declare(String)
+V.Local.iCounter.Declare(Long)
+V.Local.sSheetName.Declare(String)
+V.Local.sType.Declare(String)
+
+F.Intrinsic.Variable.AddRV("RETURN_ID", "***NORETURN***")
+
+V.Local.sSheetName.Set(V.Args.NAME.Trim)
+
+F.Intrinsic.Control.CallSub(SS_APIGet, "TOKEN", V.Global.sToken, "REQUEST", "", "PARAMETERS", "?includeAll=True", "TYPE", V.Args.Type)
+
+F.Communication.JSON.Reset
+F.Communication.JSON.ParseFile(V.Args.RETURN_File)
+F.Intrinsic.File.DeleteFile(V.Args.RETURN_File)
+
+'get the node count
+F.Communication.JSON.HasXPath("/JSON/totalCount", V.Local.bExists)
+F.Intrinsic.Control.If(V.Local.bExists)
+	F.Communication.JSON.SetProperty("XPath", "/JSON/totalCount")
+	F.Communication.JSON.ReadProperty("XText", V.Local.iNodes)
+F.Intrinsic.Control.Else
+
+	F.Intrinsic.Control.ExitSub
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.For(V.Local.iCounter, 1, V.Local.iNodes, 1)
+	F.Intrinsic.String.Build("/JSON/data/[{0}]/name", V.Local.iCounter, V.Local.sPath)
+	F.Communication.JSON.HasXPath(V.Local.sPath, V.Local.bExists)
+	F.Intrinsic.Control.If(V.Local.bExists)
+		F.Communication.JSON.SetProperty("XPath", V.Local.sPath)
+		F.Communication.JSON.ReadProperty("XText", V.Local.sValue)
+		
+		F.Intrinsic.String.TrimChar(V.Local.sValue, V.Ambient.DblQuote, V.Local.sValue)
+		F.Intrinsic.String.RegExReplace(V.Local.sValue.UCase, "#[^-]+-", "", True, False, V.Local.sValue)
+		
+		F.Intrinsic.Control.If(V.Local.sValue, =, V.Local.sSheetName.UCase)
+			F.Intrinsic.String.Build("/JSON/data/[{0}]/id", V.Local.iCounter, V.Local.sPath)
+			F.Communication.JSON.SetProperty("XPath", V.Local.sPath)
+			F.Communication.JSON.ReadProperty("XText", V.Local.sValue)
+			
+			F.Intrinsic.String.TrimChar(V.Local.sValue, V.Ambient.DblQuote, V.Local.sValue)
+			F.Intrinsic.Variable.AddRV("RETURN_ID", V.Local.sValue)
+			F.Intrinsic.Control.ExitSub
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.Next(V.Local.iCounter)
+Program.Sub.SS_GetID.End
+
+Program.Sub.SS_GetIDMultiples.Start
+'pass NAME
+'pass Type S = sheets, R = Reports
+'returns RETURN_ID
+'returns a delimited string *&^%^&* of the IDs matching the passed name
+
+'maybe add owner, date modified, etc to this
+
+V.Local.bExists.Declare(Boolean, False)
+V.Local.iNodes.Declare(Long, 0)
+V.Local.sPath.Declare(String)
+V.Local.sValue.Declare(String)
+V.Local.iCounter.Declare(Long)
+V.Local.sSheetName.Declare(String)
+V.Local.sType.Declare(String)
+V.Local.sID.Declare(String)
+V.Local.sFilter.Declare(String)
+V.Local.sReturn.Declare(String)
+
+'get sheet list
+V.Local.sSheetName.Set(V.Args.NAME.Trim)
+F.Intrinsic.Control.CallSub(SS_APIGet, "TOKEN", V.Global.sToken, "REQUEST", "", "PARAMETERS", "?includeAll=True", "TYPE", V.Args.Type)
+
+F.Communication.JSON.Reset
+F.Communication.JSON.ParseFile(V.Args.RETURN_File)
+F.Intrinsic.File.DeleteFile(V.Args.RETURN_File)
+
+'Create Sheet DT
+F.Data.DataTable.Create("dtSheets")
+F.Data.DataTable.AddColumn("dtSheets", "SHEET_NAME", "String", "")
+F.Data.DataTable.AddColumn("dtSheets", "SHEET_ID", "String", "")
+
+'get the node count
+F.Communication.JSON.HasXPath("/JSON/totalCount", V.Local.bExists)
+F.Intrinsic.Control.If(V.Local.bExists)
+	F.Communication.JSON.SetProperty("XPath", "/JSON/totalCount")
+	F.Communication.JSON.ReadProperty("XText", V.Local.iNodes)
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.For(V.Local.iCounter, 1, V.Local.iNodes, 1)
+	F.Intrinsic.String.Build("/JSON/data/[{0}]/name", V.Local.iCounter, V.Local.sPath)
+	F.Communication.JSON.HasXPath(V.Local.sPath, V.Local.bExists)
+	F.Intrinsic.Control.If(V.Local.bExists)
+		F.Communication.JSON.SetProperty("XPath", V.Local.sPath)
+		F.Communication.JSON.ReadProperty("XText", V.Local.sValue)
+		
+		F.Intrinsic.String.TrimChar(V.Local.sValue, V.Ambient.DblQuote, V.Local.sValue)
+		'should I return the owner?
+		F.Intrinsic.String.RegExReplace(V.Local.sValue.UCase, "#[^-]+-", "", True, False, V.Local.sValue)
+		
+		F.Intrinsic.String.Build("/JSON/data/[{0}]/id", V.Local.iCounter, V.Local.sPath)
+		F.Communication.JSON.HasXPath(V.Local.sPath, V.Local.bExists)
+		F.Intrinsic.Control.If(V.Local.bExists)
+			F.Communication.JSON.SetProperty("XPath", V.Local.sPath)
+			F.Communication.JSON.ReadProperty("XText", V.Local.sID)
+			F.Data.DataTable.AddRow("dtSheets", "SHEET_NAME", V.Local.sValue, "SHEET_ID", V.Local.sID)
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.Next(V.Local.iCounter)
+
+F.Intrinsic.String.Build("[SHEET_NAME] = '{0}'", V.Local.sSheetName, V.Local.sFilter)
+F.Data.DataView.Create("dtSheets", "dvSheets", 22, V.Local.sFilter, "")
+F.Intrinsic.Control.If(V.DataView.dtSheets!dvSheets.RowCount, >, 0)
+	F.Data.DataView.ToString("dtSheets", "dvSheets", "SHEET_ID", "***NODELIMITER***", "*&^%^&*", V.Local.sReturn)
+F.Intrinsic.Control.Else
+	V.Local.sReturn.Set("***NORETURN***")
+F.Intrinsic.Control.EndIf
+F.Data.DataView.Close("dtSheets", "dvSheets")
+F.Data.Datatable.Close("dtSheets")
+
+F.Intrinsic.Variable.AddRV("RETURN_ID", V.Local.sReturn)
+Program.Sub.SS_GetIDMultiples.End
+
+Program.Sub.SS_APIGet.Start
+'pass REQUEST
+'pass PARAMETERS
+'pass TYPE (sheets = s/reports = r)
+'returns RETURN_FILE
+
+'calling with no request will give a list of accessible sheets
+'calling with the sheet id as the request will return the sheet
+
+V.Local.sURL.Declare(String, "https://api.smartsheet.com/2.0/")
+V.Local.sFile.Declare(String)
+V.Local.sAuthorization.Declare(String)
+V.Local.sQuery.Declare(String)
+V.Local.sType.Declare(String)
+V.Local.sData.Declare(String)
+
+F.Intrinsic.Control.If(V.Args.TYPE.UCase, =, "S")
+	V.Local.sType.Set("sheets")
+F.Intrinsic.Control.ElseIF(V.Args.TYPE.UCase, =, "R")
+	V.Local.sType.Set("reports")
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.String.Build("{0}\SmartSheet_{1}_{2}_{3}.JSON", V.Caller.TempDir, V.Caller.CompanyCode, V.Caller.User, V.Ambient.Now.FormatYYYYMMDDHHNNSS, V.Local.sFile)
+F.Intrinsic.String.Build("{0}{1}/{2}{3}", V.Local.sURL, V.Local.sType, V.Args.REQUEST, V.Args.Parameters, V.Local.sQuery)
+F.Intrinsic.String.Build("Bearer {0}", V.Global.sToken, V.Local.sAuthorization)
+
+F.Communication.HTTP.ResetHeaders
+F.Communication.HTTP.SetProperty("Authorization", V.Local.sAuthorization)
+F.Communication.HTTP.SetProperty("HTTPMethod", "GET")
+F.Communication.HTTP.SetProperty("ContentType", "application/json")
+F.Communication.HTTP.SetProperty("FollowRedirects", 1)
+F.Communication.HTTP.SetProperty("URL", V.Local.sURL)
+F.Communication.HTTP.SetProperty("LocalFile", V.Local.sFile)
+F.Communication.HTTP.Get(V.Local.sQuery)
+
+F.Intrinsic.Variable.AddRV("RETURN_FILE", V.Local.sFile)
+Program.Sub.SS_APIGet.End
+
+Program.Sub.SS_APIPost.Start
+'pass REQUEST
+'pass PARAMETERS
+'pass BODY
+
+'calling with no request will give a list of accessible sheets
+'calling with the sheet id as the request will return the sheet
+
+V.Local.sURL.Declare(String, "https://api.smartsheet.com/2.0/sheets/")
+V.Local.sAuthorization.Declare(String)
+V.Local.sQuery.Declare(String)
+V.Local.sRet.Declare(String)
+
+F.Intrinsic.String.Build("{0}{1}{2}", V.Local.sURL, V.Args.REQUEST, V.Args.Parameters.Trim, V.Local.sQuery)
+F.Intrinsic.String.Build("Bearer {0}", V.Global.sToken, V.Local.sAuthorization)
+
+F.Communication.HTTP.ResetHeaders
+F.Communication.HTTP.SetProperty("Authorization", V.Local.sAuthorization)
+F.Communication.HTTP.SetProperty("HTTPMethod", "POST")
+F.Communication.HTTP.SetProperty("ContentType", "application/json")
+F.Communication.HTTP.SetProperty("FollowRedirects", 1)
+F.Communication.HTTP.SetProperty("URL", V.Local.sURL)
+F.Communication.HTTP.SetProperty("PostData", V.Args.Body)
+F.Communication.HTTP.Post(V.Local.sQuery)
+Program.Sub.SS_APIPost.End
+
+Program.Sub.SS_GetSheetColumnMapping.Start
+'pass SHEET_NAME
+'pass boolean DATATABLE_FRIENDLY
+'returns RETURN_COLUMN_MAPPING Name!@#$#@!ID!@#$#@!Type*&^%^&*etc.
+
+F.Intrinsic.Control.CallSub(SS_GetSheetID, "SHEET_NAME", V.Args.SHEET_NAME)
+F.Intrinsic.Control.CallSub(SS_GetColumnMapping, "ID", V.Args.RETURN_SHEET_ID, "DATATABLE_FRIENDLY", V.Args.DATATABLE_FRIENDLY, "TYPE", "S")
+F.Intrinsic.Variable.AddRV("RETURN_COLUMN_MAPPING", V.Args.RETURN_COLUMN_MAPPING)
+Program.Sub.SS_GetSheetColumnMapping.End
+
+Program.Sub.SS_GetReportColumnMapping.Start
+'pass REPORT_NAME
+'pass boolean DATATABLE_FRIENDLY
+'returns RETURN_COLUMN_MAPPING Name!@#$#@!ID!@#$#@!Type*&^%^&*etc.
+
+F.Intrinsic.Control.CallSub(SS_GetReportID, "REPORT_NAME", V.Args.REPORT_NAME)
+F.Intrinsic.Control.CallSub(SS_GetColumnMapping, "ID", V.Args.RETURN_REPORT_ID, "DATATABLE_FRIENDLY", V.Args.DATATABLE_FRIENDLY, "TYPE", "R")
+F.Intrinsic.Variable.AddRV("RETURN_COLUMN_MAPPING", V.Args.RETURN_COLUMN_MAPPING)
+Program.Sub.SS_GetReportColumnMapping.End
+
+Program.Sub.SS_GetColumnMapping.Start
+'pass ID
+'pass boolean DATATABLE_FRIENDLY
+'pass TYPE (sheets = s, reports = r)
+'returns RETURN_COLUMN_MAPPING Name!@#$#@!ID!@#$#@!Type*&^%^&*etc.
+
+V.Local.bExists.Declare(Boolean)
+V.Local.bFriendly.Declare(Boolean)
+V.Local.sRequest.Declare(String)
+V.Local.sColumnMapping.Declare(String)
+V.Local.sSingleColumn.Declare(String)
+V.Local.sPath.Declare(String)
+V.Local.sID.Declare(String)
+V.Local.sTitle.Declare(String)
+V.Local.sType.Declare(String)
+V.Local.iColumns.Declare(Long)
+V.Local.iCounter.Declare(Long)
+V.Local.bInString.Declare(Boolean)
+V.Local.sTitleTemp.Declare(String)
+
+'download column list and parse
+F.Intrinsic.String.Build("{0}/columns", V.Args.ID, V.Local.sRequest)
+F.Intrinsic.Control.CallSub(SS_APIGet, "REQUEST", V.Local.sRequest, "PARAMETERS", "?includeAll=True", "TYPE", V.Args.Type)
+
+F.Communication.JSON.Reset
+F.Communication.JSON.ParseFile(V.Args.RETURN_File)
+F.Intrinsic.File.DeleteFile(V.Args.RETURN_File)
+
+'get column count
+V.Local.sPath.Set("/JSON/totalCount")
+F.Communication.JSON.HasXPath(V.Local.sPath, V.Local.bExists)
+F.Intrinsic.Control.If(V.Local.bExists)
+	F.Communication.JSON.SetProperty("XPath", V.Local.sPath)
+	F.Communication.JSON.ReadProperty("XText", V.Local.iColumns)
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.For(V.Local.iCounter, 1, V.Local.iColumns, 1)
+	'get column id
+	F.Intrinsic.String.Build("/JSON/data/[{0}]/id", V.Local.iCounter, V.Local.sPath)
+	F.Communication.JSON.HasXPath(V.Local.sPath, V.Local.bExists)
+	F.Intrinsic.Control.If(V.Local.bExists)
+		F.Communication.JSON.SetProperty("XPath", V.Local.sPath)
+		F.Communication.JSON.ReadProperty("XText", V.Local.sID)
+	F.Intrinsic.Control.Else
+		V.Local.sID.Set("")
+	F.Intrinsic.Control.EndIf
+	
+	'get column name
+	F.Intrinsic.String.Build("/JSON/data/[{0}]/title", V.Local.iCounter, V.Local.sPath)
+	F.Communication.JSON.HasXPath(V.Local.sPath, V.Local.bExists)
+	F.Intrinsic.Control.If(V.Local.bExists)
+		F.Communication.JSON.SetProperty("XPath", V.Local.sPath)
+		F.Communication.JSON.ReadProperty("XText", V.Local.sTitle)
+		F.Intrinsic.String.TrimChar(V.Local.sTitle, V.Ambient.DblQuote, V.Local.sTitle)
+	F.Intrinsic.Control.Else
+		V.Local.sTitle.Set("")
+	F.Intrinsic.Control.EndIf
+	
+	'get column type
+	F.Intrinsic.String.Build("/JSON/data/[{0}]/type", V.Local.iCounter, V.Local.sPath)
+	F.Communication.JSON.HasXPath(V.Local.sPath, V.Local.bExists)
+	F.Intrinsic.Control.If(V.Local.bExists)
+		F.Communication.JSON.SetProperty("XPath", V.Local.sPath)
+		F.Communication.JSON.ReadProperty("XText", V.Local.sType)
+		F.Intrinsic.String.TrimChar(V.Local.sType, V.Ambient.DblQuote, V.Local.sType)
+	F.Intrinsic.Control.Else
+		V.Local.sType.Set("")
+	F.Intrinsic.Control.EndIf
+	
+	'make datatable friendly if necessary
+	F.Intrinsic.Control.IF(V.Args.DATATABLE_FRIENDLY)
+		F.Intrinsic.String.StripCharacters(V.Local.sTitle, V.Local.sTitle)
+		
+		'maybe add numbering if same column name here
+		F.Intrinsic.Control.SelectCase(V.Local.sType.UCase)
+			F.Intrinsic.Control.Case("DATE")
+				V.Local.sType.Set("Date")
+			F.Intrinsic.Control.Case("CHECKBOX")
+				V.Local.sType.Set("Boolean")
+			F.Intrinsic.Control.CaseElse
+				V.Local.sType.Set("String")
+		F.Intrinsic.Control.EndSelect
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.Control.If(V.Local.iCounter, >, 1)
+		F.Intrinsic.String.Build("{0}*&^%^&*{1}!@#$#@!{2}!@#$#@!{3}", V.Local.sColumnMapping, V.Local.sTitle, V.Local.sID, V.Local.sType, V.Local.sColumnMapping)
+	F.Intrinsic.Control.Else
+		F.Intrinsic.String.Build("{0}!@#$#@!{1}!@#$#@!{2}", V.Local.sTitle, V.Local.sID, V.Local.sType, V.Local.sColumnMapping)
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.Next(V.Local.iCounter)
+
+F.Intrinsic.Variable.AddRV("RETURN_COLUMN_MAPPING", V.Local.sColumnMapping)
+Program.Sub.SS_GetColumnMapping.End
+
+Program.Sub.SS_AddRowByMap.Start
+'pass MAP  - COLUMN!@#$#@!VALUE*&^%^&*etc.
+'pass SHEET_NAME
+
+'get sheet id
+F.Intrinsic.Control.CallSub(SS_GetSheetID, "SHEET_NAME", V.Args.SHEET_NAME)
+F.Intrinsic.Control.CallSub(SS_AddRowByMapAndID, "SHEET_ID", V.Args.RETURN_SHEET_ID, "MAP", V.Args.MAP)
+Program.Sub.SS_AddRowByMap.End
+
+Program.Sub.SS_AddRowByMapAndID.Start
+'pass MAP  - COLUMN!@#$#@!VALUE*&^%^&*etc.
+'pass SHEET_ID
+
+V.Local.sFilter.Declare(String)
+V.Local.sCells.Declare(String)
+V.Local.iCounter.Declare(Long)
+V.Local.sValue.Declare(String)
+V.Local.sBody.Declare(String)
+V.Local.sRequest.Declare(String)
+
+'create column name datatable
+F.Intrinsic.Control.CallSub(SS_GetColumnMapping, "ID", V.Args.SHEET_ID, "DATATABLE_FRIENDLY", False, "TYPE", "S")
+F.Data.DataTable.CreateFromString("dtColumns", V.Args.RETURN_COLUMN_MAPPING, "NAME*!*ID*!*TYPE", "STRING*!*STRING*!*STRING", "!@#$#@!", "*&^%^&*")
+
+'create row datatable
+F.Data.DataTable.CreateFromString("dtRow", V.Args.MAP, "COLUMN*!*VALUE", "STRING*!*STRING", "!@#$#@!", "*&^%^&*")
+
+'build the cell json array
+F.Data.DataView.Create("dtColumns", "dvColumns", 22)
+V.Local.sCells.Redim(0, V.DataTable.dtRow.RowCount--)
+F.Intrinsic.Control.For(V.Local.iCounter, 0, V.DataTable.dtRow.RowCount--, 1)
+	F.Intrinsic.String.Build("[NAME] = '{0}'", V.DataTable.dtRow(V.Local.iCounter).COLUMN!FieldValTrim, V.Local.sFilter)
+	F.Data.DataView.SetFilter("dtColumns", "dvColumns", V.Local.sFilter)
+	
+	F.Intrinsic.Control.If(V.DataView.dtColumns!dvColumns.RowCount, >, 0)
+		F.Intrinsic.Control.If(V.DataView.dtColumns!dvColumns(0).TYPE!FieldValTrim, !=, "CHECKBOX")
+			F.Intrinsic.String.Build("{0}{1}{0}", V.Ambient.DblQuote, V.DataTable.dtRow(V.Local.iCounter).VALUE!FieldValTrim, V.Local.sValue)
+		F.Intrinsic.Control.Else
+			V.Local.sValue.Set(V.DataTable.dtRow(V.Local.iCounter).VALUE!FieldValTrim)
+		F.Intrinsic.Control.EndIf
+		
+		F.Intrinsic.String.Build("{{0}columnId{0}: {1}, {0}value{0}: {2}}", V.Ambient.DblQuote, V.DataView.dtColumns!dvColumns(0).ID!FieldValTrim, V.Local.sValue, V.Local.sCells(V.Local.iCounter))
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.Next(V.Local.iCounter)
+F.Data.DataView.Close("dtColumns", "dvColumns")
+
+F.Intrinsic.String.Join(V.Local.sCells, ", ", V.Local.sCells)
+V.Local.sCells.RedimPreserve(0, 0)
+F.Intrinsic.String.Build("[{{0}cells{0}: [{1}]}]", V.Ambient.DblQuote, V.Local.sCells, V.Local.sBody)
+
+F.Data.DataTable.Close("dtRow")
+F.Data.DataTable.Close("dtColumns")
+
+F.Intrinsic.String.Build("{0}/rows", V.Args.SHEET_ID, V.Local.sRequest)
+F.Intrinsic.Control.CallSub(SS_APIPost, "REQUEST", V.Local.sRequest, "BODY", V.Local.sBody, "PARAMETERS", "")
+Program.Sub.SS_AddRowByMapAndID.End
+
+Program.Sub.SS_AddRowsByDataTableAndName.Start
+'pass global DATATABLE_NAME
+'pass SHEET_NAME
+'pass MAP DTCOLUMN!@#$#@!SS_COLUMN*&^%^&*etc.
+
+'get sheet id
+F.Intrinsic.Control.CallSub(SS_GetSheetID, "SHEET_NAME", V.Args.SHEET_NAME)
+F.Intrinsic.Control.CallSub(SS_AddRowsByDataTableAndID, "SHEET_ID", V.Args.RETURN_SHEET_ID, "MAP", V.Args.MAP, "DATATABLE_NAME", V.Args.DATATABLE_NAME)
+Program.Sub.SS_AddRowsByDataTableAndName.End
+
+Program.Sub.SS_AddRowsByDataTableAndID.Start
+'pass global DATATABLE_NAME
+'pass SHEET_ID
+'pass MAP DTCOLUMN!@#$#@!SS_COLUMN*&^%^&*etc.
+
+V.Local.sRequest.Declare(String)
+
+F.Intrinsic.Control.CallSub(SS_BuildRowsJSON, "MAP", V.Args.MAP, "DATATABLE_NAME", V.Args.DATATABLE_NAME, "SHEET_ID", V.Args.SHEET_ID, "INCLUDE_ROW_ID", False)
+F.Intrinsic.String.Build("{0}/rows", V.Args.SHEET_ID, V.Local.sRequest)
+F.Intrinsic.Control.CallSub(SS_APIPost, "REQUEST", V.Local.sRequest, "BODY", V.Args.RETURN_JSON, "PARAMETERS", "")
+Program.Sub.SS_AddRowsByDataTableAndID.End
+
+Program.Sub.SS_BuildRowsJSON.Start
+'pass DATATABLE_NAME
+'pass INCLUDE_ROW_ID
+'pass SHEET_ID
+	'pass KEY_COLUMN *!* if using include ROW_ID
+	
+'returns RETURN_JSON
+
+V.Local.sFilter.Declare(String)
+V.Local.sCells.Declare(String)
+V.Local.iCounter.Declare(Long)
+V.Local.iRowCounter.Declare(Long)
+V.Local.sValue.Declare(String)
+V.Local.sBody.Declare(String)
+V.Local.sRequest.Declare(String)
+V.Local.sFields.Declare(String)
+V.Local.sJSON.Declare(String)
+V.Local.sRows.Declare(String)
+V.Local.iIndex.Declare(Long)
+V.Local.sExpression.Declare(String)
+V.Local.sTemp.Declare(String)
+V.Local.iRows.Declare(Long)
+
+'create column name datatable
+F.Intrinsic.Control.CallSub(SS_GetColumnMapping, "ID", V.Args.SHEET_ID, "DATATABLE_FRIENDLY", False, "TYPE", "S")
+F.Data.DataTable.CreateFromString("dtColumns", V.Args.RETURN_COLUMN_MAPPING, "NAME*!*ID*!*TYPE", "STRING*!*STRING*!*STRING", "!@#$#@!", "*&^%^&*")
+
+'create mapping datatable
+F.Data.DataTable.CreateFromString("dtMapping", V.Args.MAP, "DATATABLE_COLUMN*!*SMARTSHEET_COLUMN", "STRING*!*STRING", "!@#$#@!", "*&^%^&*")
+
+'if updating
+F.Intrinsic.Control.If(V.Args.INCLUDE_ROW_ID)
+	F.Intrinsic.Control.CallSub(SS_GetRowMapByID, "SHEET_ID", V.Args.SHEET_ID, "KEY_COLUMN", V.Args.KEY_COLUMN)
+	
+	F.Data.DataTable.CreateFromString("dtRows", V.Args.RETURN_ROW_MAP, "ROW_ID*!*KEY", "STRING*!*STRING", "!@#$#@!", "*&^%^&*")
+	F.Data.DataView.Create("dtRows", "dvRows", 22)
+
+	'need to get this from map not strip
+	F.Intrinsic.String.Split(V.Args.KEY_COLUMN, "*!*", V.Local.sFields)
+	F.Intrinsic.Control.For(V.Local.iCounter, 0, V.Local.sFields.UBound, 1)
+		F.Intrinsic.String.StripCharacters(V.Local.sFields(V.Local.iCounter), V.Local.sTemp)
+		F.Intrinsic.Control.If(V.Local.iCounter, =, 0)
+			F.Intrinsic.String.Build("Trim([{0}])", V.Local.sTemp, V.Local.sExpression)
+		F.Intrinsic.Control.Else
+			F.Intrinsic.String.Build("{0} + Trim([{1}])", V.Local.sExpression, V.Local.sTemp, V.Local.sExpression)
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.Next(V.Local.iCounter)
+
+	F.Data.DataTable.AddExpressionColumn(V.Args.DATATABLE_NAME, "SS_ROW_MAP_KEY", "String", V.Local.sExpression)
+F.Intrinsic.Control.EndIf
+	
+'build the cell json array
+F.Data.DataView.Create("dtColumns", "dvColumns", 22)
+F.Data.DataView.Create("dtMapping", "dvMapping", 22)
+V.Local.sFields.Set(V.DataTable.[V.Args.DATATABLE_NAME].FieldNames)
+V.Local.iRows.Set(-1)
+'V.Local.sRows.Redim(0, V.DataTable.[V.Args.DATATABLE_NAME].RowCount--)
+F.Intrinsic.String.Split(V.Local.sFields, "*!*", V.Local.sFields)
+F.Intrinsic.Control.For(V.Local.iRowCounter, 0, V.DataTable.[V.Args.DATATABLE_NAME].RowCount--, 1)
+	V.Local.sCells.Redim(0, 0)
+	V.Local.iIndex.Set(-1)
+	F.Intrinsic.Control.For(V.Local.iCounter, 0, V.Local.sFields.UBound, 1)
+		
+		'get map
+		F.Intrinsic.String.Build("[DATATABLE_COLUMN] = '{0}'", V.Local.sFields(V.Local.iCounter), V.Local.sFilter)
+		F.Data.DataView.SetFilter("dtMapping", "dvMapping", V.Local.sFilter)
+		
+		F.Intrinsic.Control.If(V.DataView.dtMapping!dvMapping.RowCount, >, 0)
+			'get type
+			F.Intrinsic.String.Build("[NAME] = '{0}'", V.DataView.dtMapping!dvMapping(0).SMARTSHEET_COLUMN!FieldValTrim, V.Local.sFilter)
+			F.Data.DataView.SetFilter("dtColumns", "dvColumns", V.Local.sFilter)
+			
+			F.Intrinsic.Control.If(V.DataView.dtColumns!dvColumns.RowCount, >, 0)
+				F.Intrinsic.Control.If(V.DataView.dtColumns!dvColumns(0).TYPE!FieldValTrim, !=, "CHECKBOX")
+					F.Intrinsic.String.Build("{0}{1}{0}", V.Ambient.DblQuote, V.DataTable.[V.Args.DATATABLE_NAME](V.Local.iRowCounter).[V.Local.sFields(V.Local.iCounter)]!FieldValTrim, V.Local.sValue)
+				F.Intrinsic.Control.Else
+					V.Local.sValue.Set(V.DataTable.[V.Args.DATATABLE_NAME](V.Local.iRowCounter).[V.Local.sFields(V.Local.iCounter)]!FieldValTrim)
+				F.Intrinsic.Control.EndIf
+				
+				F.Intrinsic.Math.Add(V.Local.iIndex, 1, V.Local.iIndex)
+				V.Local.sCells.RedimPreserve(0, V.Local.iIndex)
+				F.Intrinsic.String.Build("{{0}columnId{0}: {1}, {0}strict{0}: false, {0}value{0}: {2}}", V.Ambient.DblQuote, V.DataView.dtColumns!dvColumns(0).ID!FieldValTrim, V.Local.sValue, V.Local.sCells(V.Local.sCells.UBound))
+			F.Intrinsic.Control.EndIf
+		F.Intrinsic.Control.EndIf
+		
+	F.Intrinsic.Control.Next(V.Local.iCounter)
+	
+	F.Intrinsic.String.Join(V.Local.sCells, ", ", V.Local.sCells)
+	V.Local.sCells.RedimPreserve(0, 0)
+	
+	F.Intrinsic.Control.If(V.Args.INCLUDE_ROW_ID)
+		F.Intrinsic.String.Build("[KEY] = '{0}'", V.DataTable.[V.Args.DATATABLE_NAME](V.Local.iRowCounter).SS_ROW_MAP_KEY!FieldValTrim, V.Local.sFilter)
+		F.Data.DataView.SetFilter("dtRows", "dvRows", V.Local.sFilter)
+		F.Intrinsic.Control.If(V.DataView.dtRows!dvRows.RowCount, =, 1)
+			V.Local.sRows.RedimPreserve(0, V.Local.iRows.++)
+			'F.Intrinsic.String.Build("{{0}id{0}: {0}{2}{0}, {0}cells{0}: [{1}]}", V.Ambient.DblQuote, V.Local.sCells, V.DataView.dtRows!dvRows(0).ROW_ID!FieldValTrim, V.Local.sRows(V.Local.iRowCounter))
+			F.Intrinsic.String.Build("{{0}id{0}: {0}{2}{0}, {0}cells{0}: [{1}]}", V.Ambient.DblQuote, V.Local.sCells, V.DataView.dtRows!dvRows(0).ROW_ID!FieldValTrim, V.Local.sRows(V.Local.sRows.UBound))
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.Else
+		V.Local.sRows.RedimPreserve(0, V.Local.iRows.++)
+		F.Intrinsic.String.Build("{{0}toBottom{0}: true, {0}cells{0}: [{1}]}", V.Ambient.DblQuote, V.Local.sCells, V.Local.sRows(V.Local.sRows.UBound))
+	F.Intrinsic.Control.EndIf
+	
+F.Intrinsic.Control.Next(V.Local.iRowCounter)
+
+F.Intrinsic.String.Join(V.Local.sRows, ", ", V.Local.sJSON)
+V.Local.sRows.Redim(0, 0)
+
+F.Intrinsic.String.Build("[{0}]", V.Local.sJSON, V.Local.sJSON)
+
+'if updating
+F.Intrinsic.Control.If(V.Args.INCLUDE_ROW_ID)
+	F.Data.DataView.Close("dtRows", "dvRows")
+	F.Data.DataTable.Close("dtRows")
+F.Intrinsic.Control.EndIf
+
+F.Data.DataView.Close("dtColumns", "dvColumns")
+F.Data.DataView.Close("dtMapping", "dvMapping")
+F.Data.DataTable.Close("dtColumns")
+F.Data.DataTable.Close("dtMapping")
+
+F.Intrinsic.Variable.AddRV("RETURN_JSON", V.Local.sJSON)
+Program.Sub.SS_BuildRowsJSON.End
+
+Program.Sub.SS_GetRowMap.Start
+'pass SHEET_NAME
+'pass KEY_COLUMN *!*
+'returns RETURN_ROW_MAP
+
+V.Local.sRowMap.Declare(String)
+
+'get sheet id
+F.Intrinsic.Control.CallSub(SS_GetSheetID, "SHEET_NAME", V.Args.SHEET_NAME)
+F.Intrinsic.Control.CallSub(SS_GetRowMapByID, "SHEET_ID", V.Args.RETURN_SHEET_ID, "KEY_COLUMN", V.Args.KEY_COLUMN)
+
+V.Local.sRowMap.Set(V.Args.RETURN_ROW_MAP)
+F.Intrinsic.Variable.AddRV("RETURN_ROW_MAP", V.Local.sRowMap)
+Program.Sub.SS_GetRowMap.End
+
+Program.Sub.SS_GetRowMapByID.Start
+'pass SHEET_NAME
+'pass KEY_COLUMN *!*
+'returns RETURN_ROW_MAP
+
+V.Local.sDataTableName.Declare(String, "dtSS_GetRowMapTemp_0")
+V.Local.iCounter.Declare(Long)
+V.Local.sFields.Declare(String)
+V.Local.sMap.Declare(String)
+V.Local.sExpression.Declare(String, "Trim([ROW_ID])")
+V.Local.sTemp.Declare(String)
+
+'since this will be global, check if it exists
+F.Intrinsic.Control.DoUntil(V.DataTable.[V.Local.sDataTableName].Exists, =, False)
+	V.Local.sDataTableName.Set(V.Local.sDataTableName.Left19)
+	F.Intrinsic.String.Build("{0}{1}", V.Local.sDataTableName, V.Local.iCounter.++, V.Local.sDataTableName)
+F.Intrinsic.Control.Loop
+
+F.Intrinsic.Control.CallSub(SS_CreateDataTable, "ID", V.Args.SHEET_ID, "TYPE", "S", "INCLUDE_ROW_ID", True, "DATATABLE_NAME", V.Local.sDataTableName)
+
+'build key column
+'need to ghet this from map not strip
+F.Intrinsic.String.Split(V.Args.KEY_COLUMN, "*!*", V.Local.sFields)
+F.Intrinsic.Control.For(V.Local.iCounter, 0, V.Local.sFields.UBound, 1)
+	F.Intrinsic.String.StripCharacters(V.Local.sFields(V.Local.iCounter), V.Local.sTemp)
+	F.Intrinsic.Control.If(V.Local.iCounter, =, 0)
+		F.Intrinsic.String.Build("Trim([{0}])", V.Local.sTemp, V.Local.sExpression)
+	F.Intrinsic.Control.Else
+		F.Intrinsic.String.Build("{0} + Trim([{1}])", V.Local.sExpression, V.Local.sTemp, V.Local.sExpression)
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.Next(V.Local.iCounter)
+
+F.Data.DataTable.AddExpressionColumn(V.Local.sDataTableName, "SS_ROW_MAP_KEY", "String", V.Local.sExpression)
+F.Data.DataView.Create(V.Local.sDataTableName, "dvString", 22)
+F.Data.DataView.ToString(V.Local.sDataTableName, "dvString", "ROW_ID*!*SS_ROW_MAP_KEY", "!@#$#@!", "*&^%^&*", V.Local.sMap)
+F.Data.DataView.Close(V.Local.sDataTableName, "dvString")
+F.Data.DataTable.Close(V.Local.sDataTableName)
+
+F.Intrinsic.Variable.AddRV("RETURN_ROW_MAP", V.Local.sMap)
+Program.Sub.SS_GetRowMapByID.End
+
+Program.Sub.SS_UpdateSheet.Start
+'pass global DATATABLE_NAME
+'pass SHEET_NAME
+'pass MAP DTCOLUMN!@#$#@!SS_COLUMN*&^%^&*etc.
+'pass KEY_COLUMN
+
+'get sheet id
+F.Intrinsic.Control.CallSub(SS_GetSheetID, "SHEET_NAME", V.Args.SHEET_NAME)
+F.Intrinsic.Control.CallSub(SS_UpdateSheetByID, "SHEET_ID", V.Args.RETURN_SHEET_ID, "MAP", V.Args.MAP, "DATATABLE_NAME", V.Args.DATATABLE_NAME, "KEY_COLUMN", V.Args.KEY_COLUMN)
+Program.Sub.SS_UpdateSheet.End
+
+Program.Sub.SS_UpdateSheetByID.Start
+'pass global DATATABLE_NAME
+'pass SHEET_ID
+'pass MAP DTCOLUMN!@#$#@!SS_COLUMN*&^%^&*etc.
+'pass KEY_COLUMN
+
+V.Local.sRequest.Declare(String)
+F.Intrinsic.Control.CallSub(SS_BuildRowsJSON, "DATATABLE_NAME", V.Args.DATATABLE_NAME, "SHEET_ID", V.Args.SHEET_ID, "INCLUDE_ROW_ID", True, "KEY_COLUMN", V.Args.KEY_COLUMN, "MAP", V.Args.MAP)
+F.Intrinsic.String.Build("{0}/rows", V.Args.SHEET_ID, V.Local.sRequest)
+F.Intrinsic.Control.CallSub(SS_APIPut, "REQUEST", V.Local.sRequest, "BODY", V.Args.RETURN_JSON, "PARAMETERS", "")
+Program.Sub.SS_UpdateSheetByID.End
+
+Program.Sub.SS_APIPut.Start
+'pass REQUEST
+'pass PARAMETERS
+'pass BODY
+
+'calling with no request will give a list of accessible sheets
+'calling with the sheet id as the request will return the sheet
+
+V.Local.sURL.Declare(String, "https://api.smartsheet.com/2.0/sheets/")
+V.Local.sAuthorization.Declare(String)
+V.Local.sQuery.Declare(String)
+V.Local.sRet.Declare(String)
+
+F.Intrinsic.String.Build("{0}{1}{2}", V.Local.sURL, V.Args.REQUEST, V.Args.Parameters.Trim, V.Local.sQuery)
+F.Intrinsic.String.Build("Bearer {0}", V.Global.sToken, V.Local.sAuthorization)
+
+F.Communication.HTTP.ResetHeaders
+F.Communication.HTTP.SetProperty("Authorization", V.Local.sAuthorization)
+F.Communication.HTTP.SetProperty("HTTPMethod", "PUT")
+F.Communication.HTTP.SetProperty("ContentType", "application/json")
+F.Communication.HTTP.SetProperty("FollowRedirects", 1)
+F.Communication.HTTP.SetProperty("URL", V.Local.sURL)
+F.Communication.HTTP.SetProperty("PostData", V.Args.Body)
+F.Communication.HTTP.Put(V.Local.sQuery)
+Program.Sub.SS_APIPut.End
+
+Program.Sub.SS_GetNameFromID.Start
+'pass OBJECT_ID
+'pass TYPE ('S' for sheet, 'R', for report)
+'returns RETURN_NAME
+
+'This will return the Name of the sheet/report for the passed ID
+
+V.Local.sReturn.Declare(String)
+v.Local.sParameters.Declare(String)
+V.Local.sValue.Declare(String)
+v.Local.bExists.Declare(Boolean)
+
+'Set parameters based on object type.
+F.Intrinsic.Control.If(V.Args.SS_OBJECT_TYPE,=,S)
+	F.Intrinsic.String.Build("{0}{1}",V.Args.OBJECT_ID,"?level=2&include=objectValue",V.Local.sParameters)
+F.Intrinsic.Control.ElseIf(V.Args.SS_OBJECT_TYPE,=,R)
+	F.Intrinsic.String.Build("{0}{1}",V.Args.OBJECT_ID,"?level=3&include=objectValue",V.Local.sParameters)
+F.Intrinsic.Control.Else
+	F.Intrinsic.Control.ExitSub
+F.Intrinsic.Control.EndIf
+
+'Call API Get Sub
+F.Intrinsic.Control.CallSub(SS_APIGet, "REQUEST", V.Args.OBJECT_ID, "TYPE", V.Args.SS_Object_Type,"PARAMETERS",V.Local.sParameters)
+
+V.Local.sReturn.Set(V.Args.RETURN_FILE)
+f.Intrinsic.Control.SelectCase(v.Local.sReturn)
+f.Intrinsic.Control.CaseAny("INVALID SHEET/REPORT ID","INVALID TOKEN")
+	F.Intrinsic.Variable.AddRV("RETURN_NAME",V.Local.sReturn)
+	F.Intrinsic.Control.ExitSub
+f.Intrinsic.Control.EndSelect
+
+F.Communication.JSON.Reset
+F.Communication.JSON.ParseFile(V.Args.RETURN_File)
+F.Intrinsic.File.DeleteFile(V.Args.RETURN_File)
+
+'get the name of the sheet/report
+F.Communication.JSON.HasXPath("/JSON/name", V.Local.bExists)
+F.Intrinsic.Control.If(V.Local.bExists)
+	F.Communication.JSON.SetProperty("XPath", "/JSON/name")
+	F.Communication.JSON.ReadProperty("XText", V.Local.sValue)
+	F.Intrinsic.String.TrimChar(V.Local.sValue,V.Ambient.DblQuote,V.Local.sValue)
+	F.Intrinsic.Variable.AddRV("RETURN_NAME", V.Local.sValue)
+F.Intrinsic.Control.EndIf
+Program.Sub.SS_GetNameFromID.End
+
+Program.Sub.SS_CreateSheetDataTableFromID.Start
+'Create DT from Sheet using sheet ID instead of name
+'pass SHEET_ID
+'pass DATATABLE_NAME
+
+F.Intrinsic.Control.CallSub(SS_CreateDataTable, "ID", V.Args.SHEET_ID, "DATATABLE_NAME", V.Args.DATATABLE_NAME, "TYPE", "S")
+Program.Sub.SS_CreateSheetDataTableFromID.End
+
+Program.Sub.SS_APIDelete.Start
+'delete rows
+'pass SHEET_ID
+'optional - pass ROW_ID as Delimited String rowID1$%^%$rowID2$%^%$rowID3,etc -- If ROW_ID does not exist, assume delete sheet
+'optional - IGNOREROWSNOTFOUND (assume true) will delete only found rows if true, false will only delete if it finds all rows
+
+'if no ROW_ID's exist, assume delete sheet
+
+V.Local.sURL.Declare(String, "https://api.smartsheet.com/2.0/sheets/")
+V.Local.sAuthorization.Declare(String)
+v.Local.iCount.Declare(Long)
+v.Local.sRowID.Declare(String)
+V.Local.sQuery.Declare(String)
+v.Local.bIgnoreVarExists.Declare(Boolean)
+v.Local.bROW_IDexists.Declare(Boolean)
+v.Local.b401ErrorExists.Declare(Boolean)
+v.Local.b404ErrorExists.Declare(Boolean)
+v.Local.sError.Declare(String)
+
+'Delete Row - {sheetId}/rows?ids={rowId1},{rowId2},{rowId3}&ignoreRowsNotFound=true
+'Delete Sheet - {sheetId}
+'Delete Report - There is no call for deleting a report
+'https://api.smartsheet.com/2.0/sheets/{sheetId}/rows?ids={rowId1},{rowId2},{rowId3}&ignoreRowsNotFound=true
+f.Intrinsic.String.Build("{0}{1}",V.Local.sURL,V.Args.SHEET_ID,v.Local.sQuery)
+
+f.Intrinsic.Variable.ArgExists("ROW_ID",v.Local.bROW_IDexists)
+f.Intrinsic.Control.If(v.Local.bROW_IDexists)
+	f.Intrinsic.String.Split(v.Args.ROW_ID,"$%^%$",v.Local.sRowID)
+	f.Intrinsic.Control.For(v.Local.iCount,0,v.Local.sRowID.UBound,1)
+		f.Intrinsic.Control.If(v.Local.iCount,=,0)
+			F.Intrinsic.String.Build("{0}/rows?ids={1}",v.Local.sQuery,v.Local.sRowID(v.Local.iCount),v.Local.sQuery)
+		f.Intrinsic.Control.Else
+			f.Intrinsic.String.Build("{0},{1}",v.Local.sQuery,v.Local.sRowID(v.Local.iCount),v.Local.sQuery)
+		f.Intrinsic.Control.EndIf
+	f.Intrinsic.Control.Next(v.Local.iCount)
+	
+	f.Intrinsic.Variable.ArgExists("IGNOREROWSNOTFOUND",v.Local.bIgnoreVarExists)
+	f.Intrinsic.Control.If(v.Local.bIgnoreVarExists)
+		f.Intrinsic.String.Build("{0}&ignoreRowsNotFound={1}",v.Local.sQuery,v.Args.IGNOREROWSNOTFOUND,v.Local.sQuery)
+	f.Intrinsic.Control.Else
+		f.Intrinsic.String.Build("{0}&ignoreRowsNotFound=true",v.Local.sQuery,v.Local.sQuery)
+	f.Intrinsic.Control.EndIf
+f.Intrinsic.Control.EndIf
+
+F.Intrinsic.String.Build("Bearer {0}", V.Global.sToken, V.Local.sAuthorization)
+
+F.Communication.HTTP.ResetHeaders
+F.Communication.HTTP.SetProperty("Authorization", V.Local.sAuthorization)
+F.Communication.HTTP.SetProperty("HTTPMethod", "DELETE")
+F.Communication.HTTP.SetProperty("FollowRedirects", 1)
+F.Communication.HTTP.SetProperty("URL", V.Local.sURL)
+f.Intrinsic.Control.Try
+	F.Communication.HTTP.Post(V.Local.sQuery)
+f.Intrinsic.Control.CatchWhen(111020)
+	f.Intrinsic.String.IsInString(v.Ambient.ErrorDescription,"404",True,v.Local.b404ErrorExists)
+	f.Intrinsic.String.IsInString(v.Ambient.ErrorDescription,"401",True,v.Local.b401ErrorExists)
+	f.Intrinsic.Control.If(v.Local.b404ErrorExists)
+		v.Local.sError.Set("404")
+	f.Intrinsic.Control.ElseIf(v.Local.b401ErrorExists)
+		v.Local.sError.Set("401")
+	f.Intrinsic.Control.EndIf
+	f.Intrinsic.Variable.AddRV("Error",v.Local.sError)
+f.Intrinsic.Control.EndTry
+Program.Sub.SS_APIDelete.End
+
+'add attachment
+
+'comments / discussions
+
+'upload from spreadsheet
+
+'download as spreadsheet / pdf
+
+'update sheet from dt (SaveToDB256)
+
+'send sheet as email
+
